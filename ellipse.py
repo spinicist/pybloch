@@ -8,6 +8,46 @@ Created on Thu May 26 09:56:47 2016
 import numpy as np
 from scipy import linalg
 
+def Gab(T1, T2, TR, alpha_d):
+    alpha = np.radians(alpha_d)
+    E1f = np.exp(-TR/T1f)
+    E2f = np.exp(-TR/T2f)
+    G = np.sin(alpha)*(1 - E1f)/(1 - E1f*np.cos(alpha) - E2f**2*(E1f - np.cos(alpha)))
+    a = E2f
+    b = E2f*(1 - E1f)*(1 + np.cos(alpha)) / (1 - E1f*np.cos(alpha) - E2f**2*(E1f - np.cos(alpha)))
+    return (G, a, b)
+
+def Gab_qmt(F, kf, T1f, T2f, T1r, T2r, f0_Hz, TR, Trf, alpha_d):
+    alpha = np.radians(alpha_d)
+    E1f = np.exp(-TR/T1f)
+    E2f = np.exp(-TR/T2f)
+    if F > 0:
+        kr = kf / F
+    else:
+        kr = 0
+    G_gauss = (T2r / np.sqrt(2*np.pi))*np.exp(-(2*np.pi*f0_Hz*T2r)**2 / 2)
+    w1 = alpha / Trf # Assume rectangular pulses for now
+#     W = np.pi * G0 * w1**2
+    W = np.pi * G_gauss * w1**2
+
+    fk = np.exp(-TR * (kf + kr))
+    fw = np.exp(-W*Trf)
+    E1r = np.exp(-TR/T1r)
+    E2r = np.exp(-TR/T2r)
+    A = 1 + F - fw*E1r*(F+fk)
+    B = 1 + fk*(F-fw*E1r*(F+1))
+    C = F*(1-E1r)*(1-fk)
+    Gp = (np.sin(alpha)*((1-E1f)*B+C))/(A - B*E1f*np.cos(alpha) - E2f**2*(B*E1f-A*np.cos(alpha)))
+    ap = E2f
+    bp = (E2f*(A-B*E1f)*(1+np.cos(alpha)))/(A - B*E1f*np.cos(alpha) - E2f**2*(B*E1f-A*np.cos(alpha)))
+    return (Gp, ap, bp)
+
+def signal(G, a, b, f0_Hz, phi, TR):
+    psi = 2 * np.pi * f0_Hz * TR
+    theta = psi + phi
+    m = G*np.exp(1j*psi/2)*(1 - a*np.exp(1j*theta))/(1 - b*np.cos(theta))
+    return m
+
 def calc_ellipse_pars(cd):
     scale = np.max(np.abs(cd))
     x = np.squeeze(np.real(cd)/scale)
