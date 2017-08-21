@@ -86,7 +86,6 @@ def calc_ellipse_pars(cd):
     th = np.arctan2(yc,xc)
     A = np.sqrt((2*(za*zf**2+zc*zd**2+zg*zb**2-2*zb*zd*zf-za*zc*zg))/(dsc*(np.sqrt((za-zc)**2 + 4*zb**2)-(za+zc))))
     B = np.sqrt((2*(za*zf**2+zc*zd**2+zg*zb**2-2*zb*zd*zf-za*zc*zg))/(dsc*(-np.sqrt((za-zc)**2 + 4*zb**2)-(za+zc))))
-    print('A ', A, ' B ', B, ' A > B ', A > B)
     if (A > B):
         T=A
         A=B
@@ -94,9 +93,8 @@ def calc_ellipse_pars(cd):
     c = np.sqrt(xc**2+yc**2)
     b = (-2*c*A + np.sqrt((2*c*A)**2-4*(c**2+B**2)*(A**2-B**2)))/(2*(c**2+B**2))
     a =  B / (b*B + c*np.sqrt(1-b**2))
-    M = scale*c*(1-b**2)/(1-a*b)
-    print(' M ', M, ' a ', a, ' b ', b, ' c ', c)
-    return (xc, yc, th, A, B, M, a, b)
+    G = scale*c*(1-b**2)/(1-a*b)
+    return (G, a, b)
     
 def calc_mri_pars(a,b,TR,FA):
     al = np.radians(FA)
