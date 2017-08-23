@@ -6,7 +6,7 @@ Created on Thu May 26 09:56:47 2016
 """
 
 import numpy as np
-from scipy import linalg
+from scipy import linalg, optimize
 
 def Gab(T1, T2, TR, alpha_d):
     alpha = np.radians(alpha_d)
@@ -48,14 +48,11 @@ def signal(G, a, b, f0_Hz, phi, TR):
     m = G*np.exp(1j*psi/2)*(1 - a*np.exp(1j*theta))/(1 - b*np.cos(theta))
     return m
 
-def calc_ellipse_pars(cd):
-    scale = np.max(np.abs(cd))
-    x = np.squeeze(np.real(cd)/scale)
-    y = np.squeeze(np.imag(cd)/scale)
+def hyper_ellipse(x, y):
     D = np.column_stack((x*x, x*y, y*y, x, y, np.ones(x.size)))
     S = np.dot(D.T,D)
+
     C = np.zeros((6,6))
-    
     N = x.shape[0]
     xc = np.sum(x) / N
     yc = np.sum(y) / N
@@ -73,6 +70,9 @@ def calc_ellipse_pars(cd):
         Z = np.real(evecs[:,5])
     else:
         Z = np.real(evecs[:,0])
+    return Z
+
+def Z_to_AB(Z):
     za = Z[0]
     zb = Z[1]/2
     zc = Z[2]
@@ -86,15 +86,46 @@ def calc_ellipse_pars(cd):
     th = np.arctan2(yc,xc)
     A = np.sqrt((2*(za*zf**2+zc*zd**2+zg*zb**2-2*zb*zd*zf-za*zc*zg))/(dsc*(np.sqrt((za-zc)**2 + 4*zb**2)-(za+zc))))
     B = np.sqrt((2*(za*zf**2+zc*zd**2+zg*zb**2-2*zb*zd*zf-za*zc*zg))/(dsc*(-np.sqrt((za-zc)**2 + 4*zb**2)-(za+zc))))
-    if (A > B):
-        T=A
-        A=B
-        B=T
-    c = np.sqrt(xc**2+yc**2)
-    b = (-2*c*A + np.sqrt((2*c*A)**2-4*(c**2+B**2)*(A**2-B**2)))/(2*(c**2+B**2))
+    if B < A:
+        A, B = B, A
+    return (A, B, xc + 1j*yc)
+
+def AB_to_Gab(A, B, c, below_ernst=False):
+    if below_ernst:
+        b = (c*A + np.sqrt((c*A)**2-(c**2+B**2)*(A**2-B**2)))/(c**2+B**2)
+    else:
+        b = (-c*A + np.sqrt((c*A)**2-(c**2+B**2)*(A**2-B**2)))/(c**2+B**2)
     a =  B / (b*B + c*np.sqrt(1-b**2))
-    G = scale*c*(1-b**2)/(1-a*b)
+    G = c*(1 - b**2)/(1 - a*b)
     return (G, a, b)
+
+def direct_fit(cdata, phi, TR):
+    def error_func(x):
+        (G, a, b, f0_Hz, phi_0) = x
+        sig = signal(G, a, b, f0_Hz, phi+phi_0, TR)
+        err = np.abs(sig - cdata)
+        return err
+    
+    c_mean = np.mean(cdata)
+    x_init = (np.abs(c_mean), 0.9, 0.9, np.angle(c_mean), 0)
+    x_lower = (0, 0, 0, -1/TR, -np.pi)
+    x_upper = (1, 1, 1,  1/TR,  np.pi)
+    result = optimize.least_squares(error_func, x_init, bounds=((x_lower, x_upper)),verbose=0)
+    return result.x
+
+def calc_ellipse_pars(cd, phi, TR, below_ernst=False, method='hyper'):
+    scale = np.max(np.abs(cd))
+
+    if method == 'hyper':
+        x = np.squeeze(np.real(cd)/scale)
+        y = np.squeeze(np.imag(cd)/scale)
+        Z = hyper_ellipse(x, y)
+        (A, B, center) = Z_to_AB(Z)
+        c = np.abs(center)
+        (G, a, b) = AB_to_Gab(A, B, c, below_ernst)
+    else:
+        (G, a, b, f0_Hz, phi_0) = direct_fit(cd/scale, phi, TR)
+    return (G*scale, a, b)
     
 def calc_mri_pars(a,b,TR,FA):
     al = np.radians(FA)
