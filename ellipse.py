@@ -31,12 +31,12 @@ def Gab_qmt(F, kf, T1f, T2f, T1r, T2r, f0_Hz, TR, Trf, alpha_d):
     else:
         kr = 0
 
-    fk = np.exp(-TR * (kf + kr))
-    fw = np.exp(-W*Trf)
     E1r = np.exp(-TR/T1r)
     G_gauss = (T2r / np.sqrt(2*np.pi))*np.exp(-(2*np.pi*f0_Hz*T2r)**2 / 2)
     w1 = alpha / Trf # Assume rectangular pulses for now
     W = np.pi * G_gauss * w1**2
+    fk = np.exp(-TR * (kf + kr))
+    fw = np.exp(-W*Trf)
 
     A = 1 + F - fw*E1r*(F+fk)
     B = 1 + fk*(F-fw*E1r*(F+1))
