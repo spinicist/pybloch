@@ -6,7 +6,7 @@ Created on Thu May 26 09:56:47 2016
 """
 
 import numpy as np
-from scipy import linalg, optimize
+from scipy import linalg, optimize, special
 
 # pylint rules on var / arg names and numbers do not suit science
 # pylint: disable=C0103,R0913,R0914
@@ -21,7 +21,7 @@ def Gab(T1, T2, TR, alpha_d):
     b = E2f*(1 - E1f)*(1 + np.cos(alpha)) / (1 - E1f*np.cos(alpha) - E2f**2*(E1f - np.cos(alpha)))
     return (G, a, b)
 
-def Gab_qmt(F, kf, T1f, T2f, T1r, T2r, f0_Hz, TR, Trf, alpha_d):
+def Gab_qmt(F, kf, T1f, T2f, T1r, T2r, f0_Hz, TR, Trf, alpha_d, shape = 'hard'):
     """Calculate SSFP Ellipse parameters with qMT"""
     alpha = np.radians(alpha_d)
     E1f = np.exp(-TR/T1f)
@@ -32,12 +32,17 @@ def Gab_qmt(F, kf, T1f, T2f, T1r, T2r, f0_Hz, TR, Trf, alpha_d):
         kr = 0
 
     E1r = np.exp(-TR/T1r)
-    G_gauss = (T2r / np.sqrt(2*np.pi))*np.exp(-(2*np.pi*f0_Hz*T2r)**2 / 2)
-    w1 = alpha / Trf # Assume rectangular pulses for now
-    W = np.pi * G_gauss * w1**2
     fk = np.exp(-TR * (kf + kr))
-    fw = np.exp(-W*Trf)
+    G_gauss = (T2r / np.sqrt(2*np.pi))*np.exp(-(2*np.pi*f0_Hz*T2r)**2 / 2)
 
+    if shape == 'hard':
+        w = alpha / Trf
+        W = np.pi * G_gauss * w**2 # Factors of Trf cancel
+    if shape == 'sinc':
+        Npi      = 4 * np.pi
+        w = alpha / (Trf * special.sici(Npi)[0] / Npi)
+        W = np.pi * G_gauss * w**2 * special.sici(2*Npi)[0] / Npi
+    fw = np.exp(-W*Trf)
     A = 1 + F - fw*E1r*(F+fk)
     B = 1 + fk*(F-fw*E1r*(F+1))
     C = F*(1-E1r)*(1-fk)
@@ -92,8 +97,14 @@ def Z_to_AB(Z):
     xc = (zc*zd-zb*zf)/dsc
     yc = (za*zf-zb*zd)/dsc
     numer = 2*(za*zf**2+zc*zd**2+zg*zb**2-2*zb*zd*zf-za*zc*zg)
-    A = np.sqrt(numer/(dsc*(np.sqrt((za-zc)**2 + 4*zb**2)-(za+zc))))
-    B = np.sqrt(numer/(dsc*(-np.sqrt((za-zc)**2 + 4*zb**2)-(za+zc))))
+    if (np.sqrt((za-zc)**2 + 4*zb**2)-(za+zc)) > 0:
+        A = np.nan
+    else:
+        A = np.sqrt(numer/(dsc*(np.sqrt((za-zc)**2 + 4*zb**2)-(za+zc))))
+    if (-np.sqrt((za-zc)**2 + 4*zb**2)-(za+zc)) > 0:
+        B = np.nan
+    else:
+        B = np.sqrt(numer/(dsc*(-np.sqrt((za-zc)**2 + 4*zb**2)-(za+zc))))
     if B < A:
         A, B = B, A
     return (A, B, xc + 1j*yc)
@@ -117,7 +128,7 @@ def direct_fit(cdata, phi, TR):
         return err
 
     c_mean = np.mean(cdata)
-    x_init = (np.abs(c_mean), 0.9, 0.9, np.angle(c_mean), 0)
+    x_init = (np.abs(c_mean), 0.9, 0.5, np.angle(c_mean) / (np.pi*TR), 0)
     x_lower = (0, 0, 0, -1/TR, -np.pi)
     x_upper = (1, 1, 1, 1/TR, np.pi)
     result = optimize.least_squares(error_func, x_init, bounds=((x_lower, x_upper)), verbose=0)
@@ -126,21 +137,37 @@ def direct_fit(cdata, phi, TR):
 def calc_ellipse_pars(cd, phi, TR, below_ernst=False, method='hyper'):
     """Find the Ellipse parameters that best fit a set of measurements"""
     scale = np.max(np.abs(cd))
-
+    cd = cd / scale
     if method == 'hyper':
-        x = np.squeeze(np.real(cd)/scale)
-        y = np.squeeze(np.imag(cd)/scale)
+        x = np.squeeze(np.real(cd))
+        y = np.squeeze(np.imag(cd))
         Z = hyper_ellipse(x, y)
         (A, B, center) = Z_to_AB(Z)
+        if np.isnan(A) or np.isnan(B):
+            return (0, 0, 0, 0, 0)
         c = np.abs(center)
         (G, a, b) = AB_to_Gab(A, B, c, below_ernst)
+
+        # Calculate theta_tr, i.e. drop RF phase, eddy currents etc. */
+        # First, center, rotate back to vertical and get 't' parameter */
+        vert = cd / (center / c)
+        ct = (np.real(vert) - c) / A
+        rhs = (ct - b) / (b*ct - 1)
+        lhs = np.column_stack((np.cos(phi), np.sin(phi)))
+        K = linalg.solve(np.dot(lhs.T, lhs), np.dot(lhs.T, rhs))
+        th_0 = -np.arctan2(K[1], K[0])
+        f0_Hz = th_0 / (2*np.pi*TR)
+        phi_0 = np.angle(c) - th_0
     else:
-        (G, a, b, f0_Hz, phi_0) = direct_fit(cd/scale, phi, TR)
-    return (G*scale, a, b)
+        (G, a, b, f0_Hz, phi_0) = direct_fit(cd, phi, TR)
+    return (G*scale, a, b, f0_Hz, phi_0)
 
 def calc_mri_pars(a, b, TR, FA):
     """Convert Ellipse Parameters into MRI Parameters"""
-    al = np.radians(FA)
-    T1 = -TR / np.log((a*(1+np.cos(al)-a*b*np.cos(al))-b)/(a*(1+np.cos(al)-a*b)-b*np.cos(al)))
-    T2 = -TR / np.log(a)
-    return (T1, T2)
+    if (a > 0) and (b > 0):
+        al = np.radians(FA)
+        T1 = -TR / np.log((a*(1+np.cos(al)-a*b*np.cos(al))-b)/(a*(1+np.cos(al)-a*b)-b*np.cos(al)))
+        T2 = -TR / np.log(a)
+        return (T1, T2)
+    else:
+        return (0, 0)
