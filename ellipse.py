@@ -52,10 +52,10 @@ def Gab_qmt(F, kf, T1f, T2f, T1r, T2r, f0_Hz, TR, Trf, alpha_d, shape = 'hard'):
           (A - B*E1f*np.cos(alpha) - E2f**2*(B*E1f-A*np.cos(alpha))))
     return (Gp, ap, bp)
 
-def signal(G, a, b, f0_Hz, phi, TR):
+def signal(G, a, b, f0_Hz, phi, phi_0, TR):
     """Convert the SSFP Ellipse parameters into a magnetization"""
     psi = 2 * np.pi * f0_Hz * TR
-    theta = psi + phi
+    theta = psi + phi + phi_0
     m = G*np.exp(1j*psi/2)*(1 - a*np.exp(1j*theta))/(1 - b*np.cos(theta))
     return m
 
@@ -97,11 +97,13 @@ def Z_to_AB(Z):
     xc = (zc*zd-zb*zf)/dsc
     yc = (za*zf-zb*zd)/dsc
     numer = 2*(za*zf**2+zc*zd**2+zg*zb**2-2*zb*zd*zf-za*zc*zg)
-    if (np.sqrt((za-zc)**2 + 4*zb**2)-(za+zc)) > 0:
+    denom = (dsc*(np.sqrt((za-zc)**2 + 4*zb**2)-(za+zc)))
+    if (numer/denom) < 0:
         A = np.nan
     else:
-        A = np.sqrt(numer/(dsc*(np.sqrt((za-zc)**2 + 4*zb**2)-(za+zc))))
-    if (-np.sqrt((za-zc)**2 + 4*zb**2)-(za+zc)) > 0:
+        A = np.sqrt(numer/denom)
+    denom = (dsc*(-np.sqrt((za-zc)**2 + 4*zb**2)-(za+zc)))
+    if (numer/denom) < 0:
         B = np.nan
     else:
         B = np.sqrt(numer/(dsc*(-np.sqrt((za-zc)**2 + 4*zb**2)-(za+zc))))
@@ -123,7 +125,7 @@ def direct_fit(cdata, phi, TR):
     """Find Ellipse Parameters by optimization (experimental)"""
     def error_func(x):
         (G, a, b, f0_Hz, phi_0) = x
-        sig = signal(G, a, b, f0_Hz, phi+phi_0, TR)
+        sig = signal(G, a, b, f0_Hz, phi, phi_0, TR)
         err = np.abs(sig - cdata)
         return err
 
