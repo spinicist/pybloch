@@ -21,9 +21,8 @@ def Gab(T1, T2, TR, alpha_d):
     b = E2f*(1 - E1f)*(1 + np.cos(alpha)) / (1 - E1f*np.cos(alpha) - E2f**2*(E1f - np.cos(alpha)))
     return (G, a, b)
 
-def Gab_qmt(F, kf, T1f, T2f, T1r, T2r, f0_Hz, TR, Trf, alpha_d, shape = 'hard'):
+def Gab_qmt(F, kf, T1f, T2f, T1r, T2r, f0_Hz, TR, pulse):
     """Calculate SSFP Ellipse parameters with qMT"""
-    alpha = np.radians(alpha_d)
     E1f = np.exp(-TR/T1f)
     E2f = np.exp(-TR/T2f)
     if F > 0:
@@ -34,18 +33,12 @@ def Gab_qmt(F, kf, T1f, T2f, T1r, T2r, f0_Hz, TR, Trf, alpha_d, shape = 'hard'):
     E1r = np.exp(-TR/T1r)
     fk = np.exp(-TR * (kf + kr))
     G_gauss = (T2r / np.sqrt(2*np.pi))*np.exp(-(2*np.pi*f0_Hz*T2r)**2 / 2)
-
-    if shape == 'hard':
-        w = alpha / Trf
-        W = np.pi * G_gauss * w**2 # Factors of Trf cancel
-    if shape == 'sinc':
-        Npi      = 4 * np.pi
-        w = alpha / (Trf * special.sici(Npi)[0] / Npi)
-        W = np.pi * G_gauss * w**2 * special.sici(2*Npi)[0] / Npi
-    fw = np.exp(-W*Trf)
+    WT = np.pi * pulse.int_omega2 * G_gauss # Product of W and Trf to save a division and multiplication
+    fw = np.exp(-WT)
     A = 1 + F - fw*E1r*(F+fk)
     B = 1 + fk*(F-fw*E1r*(F+1))
     C = F*(1-E1r)*(1-fk)
+    alpha = pulse.flip_r
     Gp = (np.sin(alpha)*((1-E1f)*B+C))/(A - B*E1f*np.cos(alpha) - E2f**2*(B*E1f-A*np.cos(alpha)))
     ap = E2f
     bp = ((E2f*(A-B*E1f)*(1+np.cos(alpha)))/
