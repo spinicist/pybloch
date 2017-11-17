@@ -11,17 +11,17 @@ from scipy import linalg, optimize, special
 # pylint rules on var / arg names and numbers do not suit science
 # pylint: disable=C0103,R0913,R0914
 
-def Gab(T1, T2, TR, alpha_d):
+def Gab(M0, T1, T2, TR, alpha_d):
     """Calculate the parameters G, a & b for SSFP Ellipse"""
     alpha = np.radians(alpha_d)
     E1f = np.exp(-TR/T1)
     E2f = np.exp(-TR/T2)
-    G = np.sin(alpha)*(1 - E1f)/(1 - E1f*np.cos(alpha) - E2f**2*(E1f - np.cos(alpha)))
+    G = M0*np.sin(alpha)*(1 - E1f)/(1 - E1f*np.cos(alpha) - E2f**2*(E1f - np.cos(alpha)))
     a = E2f
     b = E2f*(1 - E1f)*(1 + np.cos(alpha)) / (1 - E1f*np.cos(alpha) - E2f**2*(E1f - np.cos(alpha)))
     return (G, a, b)
 
-def Gab_qmt(F, kf, T1f, T2f, T1r, T2r, f0_Hz, TR, pulse):
+def Gab_qmt(M0, F, kf, T1f, T2f, T1r, T2r, f0_Hz, TR, pulse):
     """Calculate SSFP Ellipse parameters with qMT"""
     E1f = np.exp(-TR/T1f)
     E2f = np.exp(-TR/T2f)
@@ -39,17 +39,28 @@ def Gab_qmt(F, kf, T1f, T2f, T1r, T2r, f0_Hz, TR, pulse):
     B = 1 + fk*(F-fw*E1r*(F+1))
     C = F*(1-E1r)*(1-fk)
     alpha = pulse.flip_r
-    Gp = (np.sin(alpha)*((1-E1f)*B+C))/(A - B*E1f*np.cos(alpha) - E2f**2*(B*E1f-A*np.cos(alpha)))
+    Gp = M0*(np.sin(alpha)*((1-E1f)*B+C))/(A - B*E1f*np.cos(alpha) - E2f**2*(B*E1f-A*np.cos(alpha)))
     ap = E2f
     bp = ((E2f*(A-B*E1f)*(1+np.cos(alpha)))/
           (A - B*E1f*np.cos(alpha) - E2f**2*(B*E1f-A*np.cos(alpha))))
+    # print('E1r',E1r)
+    # print('fk',fk)
+    # print('G_gauss',G_gauss)
+    # print('WT',WT)
+    # print('fw',fw)
+    # print('A',A)
+    # print('B',B)
+    # print('C',C)
+    # print('Gp',Gp)
+    # print('bp',bp)
     return (Gp, ap, bp)
 
-def signal(G, a, b, f0_Hz, phi, phi_0, TR):
+def signal(G, a, b, f0_Hz, psi_0, phi, TR):
     """Convert the SSFP Ellipse parameters into a magnetization"""
-    psi = 2 * np.pi * f0_Hz * TR
-    theta = psi + phi + phi_0
-    m = G*np.exp(1j*psi/2)*(1 - a*np.exp(1j*theta))/(1 - b*np.cos(theta))
+    theta_0 = 2 * np.pi * f0_Hz * TR
+    theta = theta_0 - phi
+    psi = theta_0/2 + psi_0
+    m = G*np.exp(1j*psi)*(1 - a*np.exp(1j*theta))/(1 - b*np.cos(theta))
     return m
 
 def hyper_ellipse(x, y):
@@ -114,47 +125,31 @@ def AB_to_Gab(A, B, c, below_ernst=False):
     G = c*(1 - b**2)/(1 - a*b)
     return (G, a, b)
 
-def direct_fit(cdata, phi, TR):
+def direct_fit(cdata, flip_d, phi, TR):
     """Find Ellipse Parameters by optimization (experimental)"""
     def error_func(x):
-        (G, a, b, f0_Hz, phi_0) = x
-        sig = signal(G, a, b, f0_Hz, phi, phi_0, TR)
+        (G, a, b, f0_Hz, psi_0) = x
+        sig = signal(G, a, b, f0_Hz, psi_0, phi, TR)
         err = np.abs(sig - cdata)
         return err
 
     c_mean = np.mean(cdata)
-    x_init = (np.abs(c_mean), 0.9, 0.5, np.angle(c_mean) / (np.pi*TR), 0)
-    x_lower = (0, 0, 0, -1/TR, -np.pi)
-    x_upper = (1, 1, 1, 1/TR, np.pi)
+    a_up = np.exp(-TR / 4.3) # Sensible upper limit from T2
+
+    # Initial guess from un-MT weighted signal equation
+    (G, a, b) = Gab(1.0, 1., 0.05, TR, flip_d) 
+
+    x_init = np.array((np.abs(c_mean), a, b, np.angle(c_mean) / (np.pi*TR), 0))
+    x_lower = np.array((0, 0, 0, -1/TR, -np.pi))
+    x_upper = np.array((1, a_up, 1, 1/TR, np.pi))
     result = optimize.least_squares(error_func, x_init, bounds=((x_lower, x_upper)), verbose=0)
     return result.x
 
-def calc_ellipse_pars(cd, phi, TR, below_ernst=False, method='hyper'):
+def calc_ellipse_pars(cd, flip_d, phi, TR):
     """Find the Ellipse parameters that best fit a set of measurements"""
     scale = np.max(np.abs(cd))
     cd = cd / scale
-    if method == 'hyper':
-        x = np.squeeze(np.real(cd))
-        y = np.squeeze(np.imag(cd))
-        Z = hyper_ellipse(x, y)
-        (A, B, center) = Z_to_AB(Z)
-        if np.isnan(A) or np.isnan(B):
-            return (0, 0, 0, 0, 0)
-        c = np.abs(center)
-        (G, a, b) = AB_to_Gab(A, B, c, below_ernst)
-
-        # Calculate theta_tr, i.e. drop RF phase, eddy currents etc. */
-        # First, center, rotate back to vertical and get 't' parameter */
-        vert = cd / (center / c)
-        ct = (np.real(vert) - c) / A
-        rhs = (ct - b) / (b*ct - 1)
-        lhs = np.column_stack((np.cos(phi), np.sin(phi)))
-        K = linalg.solve(np.dot(lhs.T, lhs), np.dot(lhs.T, rhs))
-        th_0 = -np.arctan2(K[1], K[0])
-        f0_Hz = th_0 / (2*np.pi*TR)
-        phi_0 = np.angle(c) - th_0
-    else:
-        (G, a, b, f0_Hz, phi_0) = direct_fit(cd, phi, TR)
+    (G, a, b, f0_Hz, phi_0) = direct_fit(cd, flip_d, phi, TR)
     return (G*scale, a, b, f0_Hz, phi_0)
 
 def calc_mri_pars(a, b, TR, FA):
