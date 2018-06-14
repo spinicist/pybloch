@@ -16,7 +16,8 @@ def Gab(M0, T1, T2, TR, alpha_d):
     alpha = np.radians(alpha_d)
     E1f = np.exp(-TR/T1)
     E2f = np.exp(-TR/T2)
-    G = M0*np.sin(alpha)*(1 - E1f)/(1 - E1f*np.cos(alpha) - E2f**2*(E1f - np.cos(alpha)))
+    echo_factor = np.exp(-TR/(2*T2))
+    G = M0*echo_factor*np.sin(alpha)*(1 - E1f)/(1 - E1f*np.cos(alpha) - E2f**2*(E1f - np.cos(alpha)))
     a = E2f
     b = E2f*(1 - E1f)*(1 + np.cos(alpha)) / (1 - E1f*np.cos(alpha) - E2f**2*(E1f - np.cos(alpha)))
     return (G, a, b)
@@ -43,16 +44,6 @@ def Gab_qmt(M0, F, kf, T1f, T2f, T1r, T2r, f0_Hz, TR, pulse):
     ap = E2f
     bp = ((E2f*(A-B*E1f)*(1+np.cos(alpha)))/
           (A - B*E1f*np.cos(alpha) - E2f**2*(B*E1f-A*np.cos(alpha))))
-    # print('E1r',E1r)
-    # print('fk',fk)
-    # print('G_gauss',G_gauss)
-    # print('WT',WT)
-    # print('fw',fw)
-    # print('A',A)
-    # print('B',B)
-    # print('C',C)
-    # print('Gp',Gp)
-    # print('bp',bp)
     return (Gp, ap, bp)
 
 def signal(G, a, b, f0_Hz, psi_0, phi, TR):
@@ -130,20 +121,33 @@ def direct_fit(cdata, flip_d, phi, TR):
     def error_func(x):
         (G, a, b, f0_Hz, psi_0) = x
         sig = signal(G, a, b, f0_Hz, psi_0, phi, TR)
-        err = np.abs(sig - cdata)
+        diff = sig - sdata
+        err = np.concatenate((np.real(diff), np.imag(diff)))
+        print('x:', x, 'err:', err)
         return err
 
-    c_mean = np.mean(cdata)
+    c_scale = np.max(np.abs(cdata))
+    sdata = cdata / c_scale
+    smean = np.mean(sdata)
     a_up = np.exp(-TR / 4.3) # Sensible upper limit from T2
 
     # Initial guess from un-MT weighted signal equation
     (G, a, b) = Gab(1.0, 1., 0.05, TR, flip_d) 
 
-    x_init = np.array((np.abs(c_mean), a, b, np.angle(c_mean) / (np.pi*TR), 0))
-    x_lower = np.array((0, 0, 0, -1/TR, -np.pi))
-    x_upper = np.array((1, a_up, 1, 1/TR, np.pi))
-    result = optimize.least_squares(error_func, x_init, bounds=((x_lower, x_upper)), verbose=0)
-    return result.x
+    best_cost = np.inf
+    for th0 in [-np.pi, 0, np.pi]:
+        psi0 = np.angle(smean / np.exp(1j*th0/2))
+        x_init = np.array((np.abs(np.mean(sdata)), a, b, th0/(np.pi*TR), psi0))
+        print('Initial start: ', x_init)
+        x_lower = np.array((0, 0, 0, -1/TR, -np.pi))
+        x_upper = np.array((20, a_up, 1, 1/TR, np.pi))
+        result = optimize.least_squares(error_func, x_init, bounds=((x_lower, x_upper)), verbose=0)
+        if result.cost < best_cost:
+            best_cost = result.cost
+            best_x = result.x
+        
+    best_x[0] = best_x[0] * c_scale
+    return best_x
 
 def calc_ellipse_pars(cd, flip_d, phi, TR):
     """Find the Ellipse parameters that best fit a set of measurements"""
