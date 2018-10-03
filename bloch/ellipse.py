@@ -117,13 +117,13 @@ def AB_to_Gab(A, B, c, below_ernst=False):
     return (G, a, b)
 
 def direct_fit(cdata, flip_d, phi, TR):
-    """Find Ellipse Parameters by optimization (experimental)"""
+    """Find Ellipse Parameters by optimization"""
     def error_func(x):
         (G, a, b, f0_Hz, psi_0) = x
         sig = signal(G, a, b, f0_Hz, psi_0, phi, TR)
         diff = sig - sdata
         err = np.concatenate((np.real(diff), np.imag(diff)))
-        print('x:', x, 'err:', err)
+        # print('x:', x, 'err:', err)
         return err
 
     c_scale = np.max(np.abs(cdata))
@@ -138,7 +138,7 @@ def direct_fit(cdata, flip_d, phi, TR):
     for th0 in [-np.pi, 0, np.pi]:
         psi0 = np.angle(smean / np.exp(1j*th0/2))
         x_init = np.array((np.abs(np.mean(sdata)), a, b, th0/(np.pi*TR), psi0))
-        print('Initial start: ', x_init)
+        # print('Initial start: ', x_init)
         x_lower = np.array((0, 0, 0, -1/TR, -np.pi))
         x_upper = np.array((20, a_up, 1, 1/TR, np.pi))
         result = optimize.least_squares(error_func, x_init, bounds=((x_lower, x_upper)), verbose=0)
