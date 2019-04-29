@@ -22,10 +22,11 @@ def Gab(M0, T1, T2, TR, alpha_d):
     b = E2f*(1 - E1f)*(1 + np.cos(alpha)) / (1 - E1f*np.cos(alpha) - E2f**2*(E1f - np.cos(alpha)))
     return (G, a, b)
 
-def Gab_qmt(M0, F, kf, T1f, T2f, T1r, T2r, f0_Hz, TR, pulse):
+def Gab_qmt(M0, f_b, kf, T1f, T2f, T1r, T2r, f0_Hz, TR, pulse):
     """Calculate SSFP Ellipse parameters with qMT"""
     E1f = np.exp(-TR/T1f)
     E2f = np.exp(-TR/T2f)
+    F = f_b / (1 - f_b)
     if F > 0:
         kr = kf / F
     else:
